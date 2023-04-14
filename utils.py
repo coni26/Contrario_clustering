@@ -134,6 +134,56 @@ def compute_Ge(A, d=L2_dist):
 def compute_pfa(p, V, V_):
     return binom.cdf(V_, V, p)
 
-def compute_nfa(p, V, V_):
-    return compute_pfa(p, V, V_)
+def compute_nfa(p, V, V_, deltas, K=10, eps=1):
+    return compute_pfa(p, V, V_) * eps / deltas[hash_function(V_, K, V)]
+
+
+def build_rand_mat(K, x_min, y_min, x_max, y_max):
+    X_H0 = np.random.uniform(size=(K,2)) * np.array([x_max - x_min, y_max - y_min]) + np.array([x_min, y_min])
+    W, D_sqinv = compute_G0(X_H0)
+    L = compute_laplacian(W, D_sqinv)
+    A = compute_AM_normalised(L, D_sqinv, 3) #3 peut être faible
+    W, g = compute_Ge(A)
+    g.compute_A()
+    g.kruskal_algo()
+    mat = g.compute_mat()
+    return mat, g
+
+def hash_function(V_, K, N):
+    return int((V_ - 1) * K / N)
+
+
+def update_deltas(deltas, eps, K, size, x_min, y_min, x_max, y_max, update_, Q=30, conf_level=0.05):
+    res_q = np.zeros((K, Q), dtype=int)
+    for q in range(Q):
+        res = np.zeros(K, dtype=int)
+        mat, g = build_rand_mat(size - 1, x_min, y_min, x_max, y_max)
+        omega = g.omega
+        V = g.V
+        for i in range(len(mat)):
+            k = hash_function(int(mat[i, 5]), K, size) 
+            pfa = compute_pfa(min(mat[i, 4] / omega, 1), V , mat[i,5])
+            if pfa < deltas[k]:
+                res[k] += 1
+        res_q[:, q] = res.copy()
+    s = np.maximum(np.std(res_q, axis=1), 1e-5)
+    m = np.mean(res_q, axis=1)
+    upd = t.cdf((m - eps / K) / s * np.sqrt(Q - 1), Q-1) > conf_level
+    deltas -= (2 * upd - 1) * update_
+    deltas = np.minimum(1, deltas)
+    return deltas, res_q
+
+def compute_deltas(size, Q=30, conf_level=0.05, eps=1, K=10):
+    deltas = 0.99 * np.ones(K)
+    update_ = 1e-3
+    for i in tqdm(range(100)):
+        if i == 10:
+            update_ = 1e-4
+        if i == 20:
+            update_ = 1e-5
+        if i == 30:
+            update_ = 1e-6
+        deltas, res_q = update_deltas(deltas, eps, K, size, x_min, y_min, x_max, y_max, update_, Q, conf_level)
+    return deltas
+
 
